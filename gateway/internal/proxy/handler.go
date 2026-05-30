@@ -13,11 +13,9 @@ import (
 )
 
 const (
-	// AgentIDHeader is the header carrying the AI agent's cryptographic identity.
 	AgentIDHeader = "X-Aegis-Agent-ID"
 )
 
-// RequestLog represents a proxied request's metadata for audit logging.
 type RequestLog struct {
 	AgentID          string  `json:"agent_id"`
 	Model            string  `json:"model"`
@@ -29,7 +27,6 @@ type RequestLog struct {
 	Timestamp        string  `json:"timestamp"`
 }
 
-// Proxy holds the dependencies for the reverse proxy.
 type Proxy struct {
 	config    *Config
 	upstream  *url.URL
@@ -39,22 +36,18 @@ type Proxy struct {
 	redact    Redactor
 }
 
-// RateLimiter defines the interface for token-based rate limiting.
 type RateLimiter interface {
-	Allow(agentID string, tokens int) (bool, int, error) // allowed, remaining, error
+	Allow(agentID string, tokens int) (bool, int, error)
 }
 
-// AuditLogger defines the interface for persisting request audit logs.
 type AuditLogger interface {
 	Log(entry *RequestLog) error
 }
 
-// Redactor defines the interface for PII redaction.
 type Redactor interface {
 	Redact(agentID string, messages []json.RawMessage) ([]json.RawMessage, error)
 }
 
-// OpenAIRequest is the minimal structure we need to inspect from LLM requests.
 type OpenAIRequest struct {
 	Model     string            `json:"model"`
 	Messages  []json.RawMessage `json:"messages"`
@@ -62,7 +55,6 @@ type OpenAIRequest struct {
 	Stream    bool              `json:"stream,omitempty"`
 }
 
-// OpenAIResponse is the minimal structure for extracting token usage.
 type OpenAIResponse struct {
 	Usage *struct {
 		PromptTokens     int `json:"prompt_tokens"`
@@ -72,16 +64,12 @@ type OpenAIResponse struct {
 	Model string `json:"model"`
 }
 
-// NewProxy creates a new Proxy instance.
 func NewProxy(cfg *Config, rl RateLimiter, al AuditLogger, red Redactor) (*Proxy, error) {
 	upstream, err := url.Parse(cfg.UpstreamURL)
 	if err != nil {
 		return nil, fmt.Errorf("invalid upstream URL: %w", err)
 	}
-
 	proxy := httputil.NewSingleHostReverseProxy(upstream)
-
-	// Modify the upstream request to include the API key
 	originalDirector := proxy.Director
 	proxy.Director = func(req *http.Request) {
 		originalDirector(req)
@@ -89,10 +77,8 @@ func NewProxy(cfg *Config, rl RateLimiter, al AuditLogger, red Redactor) (*Proxy
 		if cfg.APIKey != "" {
 			req.Header.Set("Authorization", "Bearer "+cfg.APIKey)
 		}
-		// Mark this as a proxied request
 		req.Header.Set("X-Aegis-Proxy", "true")
 	}
-
 	return &Proxy{
 		config:    cfg,
 		upstream:  upstream,
@@ -103,27 +89,58 @@ func NewProxy(cfg *Config, rl RateLimiter, al AuditLogger, red Redactor) (*Proxy
 	}, nil
 }
 
-// ServeHTTP implements the http.Handler interface. It is the main entry point
-// for all proxied LLM requests.
 func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// Health check endpoint
+	if r.URL.Path == "/health" {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]string{
+			"status":  "ok",
+			"service": "aegis-gateway",
+			"version": "1.0.0",
+		})
+		return
+	}
+
+	// Metrics endpoint (placeholder for Prometheus)
+	if r.URL.Path == "/metrics" {
+		w.Header().Set("Content-Type", "text/plain")
+		fmt.Fprintf(w, `# AegisAI Gateway Metrics
+# TYPE aegis_requests_total counter
+aegis_requests_total 0
+# TYPE aegis_rate_limits_total counter
+aegis_rate_limits_total 0
+# TYPE aegis_tokens_used_total counter
+aegis_tokens_used_total 0
+# TYPE aegis_upstream_latency_seconds histogram
+aegis_upstream_latency_seconds_bucket{le="0.05"} 0
+aegis_upstream_latency_seconds_bucket{le="0.1"} 0
+aegis_upstream_latency_seconds_bucket{le="+Inf"} 0
+`)
+		return
+	}
+
+	// Stats API endpoints
+	if r.URL.Path == "/api/v1/stats/totals" || r.URL.Path == "/api/v1/stats/agents" ||
+		r.URL.Path == "/api/v1/stats/logs" {
+		p.handleStatsAPI(w, r)
+		return
+	}
+
+	// Regular proxy flow
 	startTime := time.Now()
 	requestID := fmt.Sprintf("aegis-%d", time.Now().UnixNano())
-
-	// Extract agent identity
 	agentID := r.Header.Get(AgentIDHeader)
 	if agentID == "" {
 		agentID = "unknown"
 	}
-
 	log.Printf("[%s] Request: %s %s | Agent: %s", requestID, r.Method, r.URL.Path, agentID)
 
-	// Only intercept chat/completions and completions endpoints
 	if !isLLMEndpoint(r.URL.Path) {
 		p.proxy.ServeHTTP(w, r)
 		return
 	}
 
-	// Read and parse the request body
 	bodyBytes, err := io.ReadAll(r.Body)
 	if err != nil {
 		http.Error(w, "failed to read request body", http.StatusBadRequest)
@@ -139,10 +156,8 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// TODO: Week 2 — Estimate token count from messages
 	promptTokens := estimateTokens(openAIReq.Messages, openAIReq.Model)
 
-	// TODO: Week 3 — Check rate limit
 	if p.rateLimit != nil {
 		allowed, remaining, err := p.rateLimit.Allow(agentID, promptTokens)
 		if err != nil {
@@ -153,9 +168,8 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("X-RateLimit-Remaining", "0")
 			w.WriteHeader(http.StatusTooManyRequests)
 			json.NewEncoder(w).Encode(map[string]interface{}{
-				"error": "rate_limit_exceeded",
-				"message": fmt.Sprintf("Agent '%s' has exceeded its token budget. "+
-					"Reduce request frequency or increase the limit.", agentID),
+				"error":               "rate_limit_exceeded",
+				"message":             fmt.Sprintf("Agent '%s' has exceeded its token budget.", agentID),
 				"agent_id":            agentID,
 				"retry_after_seconds": 60,
 			})
@@ -164,33 +178,27 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-RateLimit-Remaining", fmt.Sprintf("%d", remaining))
 	}
 
-	// TODO: Week 6 — Redact PII from messages
 	if p.redact != nil {
 		redactedMessages, err := p.redact.Redact(agentID, openAIReq.Messages)
 		if err != nil {
 			log.Printf("[%s] Redaction error (proceeding without): %v", requestID, err)
 		} else {
-			// Rebuild the request body with redacted messages
 			openAIReq.Messages = redactedMessages
 			newBody, _ := json.Marshal(openAIReq)
 			r.Body = io.NopCloser(bytes.NewBuffer(newBody))
 			r.ContentLength = int64(len(newBody))
 		}
 	} else {
-		// Restore original body for upstream
 		r.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
 	}
 
-	// Capture the upstream response for audit logging
 	recorder := &responseRecorder{
 		ResponseWriter: w,
 		statusCode:     http.StatusOK,
 		body:           new(bytes.Buffer),
 	}
-
 	p.proxy.ServeHTTP(recorder, r)
 
-	// Parse the response to extract token usage
 	var openAIResp OpenAIResponse
 	completionTokens := 0
 	if err := json.Unmarshal(recorder.body.Bytes(), &openAIResp); err == nil && openAIResp.Usage != nil {
@@ -198,10 +206,8 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		completionTokens = openAIResp.Usage.CompletionTokens
 	}
 
-	// Calculate cost (simplified: $0.01 per 1K prompt tokens, $0.03 per 1K completion tokens for GPT-4)
 	cost := calculateCost(openAIReq.Model, promptTokens, completionTokens)
 
-	// Log to audit trail
 	if p.audit != nil {
 		logEntry := &RequestLog{
 			AgentID:          agentID,
@@ -223,7 +229,25 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		requestID, r.URL.Path, agentID, openAIReq.Model, promptTokens, completionTokens, cost, elapsed)
 }
 
-// responseRecorder wraps http.ResponseWriter to capture the response status and body.
+func (p *Proxy) handleStatsAPI(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+
+	switch r.URL.Path {
+	case "/api/v1/stats/totals":
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"total_tokens":   0,
+			"total_cost":     0,
+			"total_requests": 0,
+			"agent_count":    0,
+		})
+	case "/api/v1/stats/agents":
+		json.NewEncoder(w).Encode([]interface{}{})
+	case "/api/v1/stats/logs":
+		json.NewEncoder(w).Encode([]interface{}{})
+	}
+}
+
 type responseRecorder struct {
 	http.ResponseWriter
 	statusCode int
@@ -240,14 +264,11 @@ func (r *responseRecorder) Write(b []byte) (int, error) {
 	return r.ResponseWriter.Write(b)
 }
 
-// isLLMEndpoint returns true if the path matches an LLM completion endpoint.
 func isLLMEndpoint(path string) bool {
 	return path == "/v1/chat/completions" || path == "/v1/completions"
 }
 
-// estimateTokens is a placeholder that will be replaced with actual token counting in Week 2.
 func estimateTokens(messages []json.RawMessage, model string) int {
-	// Rough estimate: 4 characters ≈ 1 token
 	total := 0
 	for _, msg := range messages {
 		total += len(msg) / 4
@@ -255,17 +276,12 @@ func estimateTokens(messages []json.RawMessage, model string) int {
 	return total
 }
 
-// calculateCost computes the approximate cost of an LLM request.
 func calculateCost(model string, promptTokens, completionTokens int) float64 {
-	// Default GPT-4 pricing
-	promptRate := 0.03     // $ per 1K tokens
-	completionRate := 0.06 // $ per 1K tokens
-
-	// GPT-3.5 Turbo is cheaper
+	promptRate := 0.03
+	completionRate := 0.06
 	if model == "gpt-3.5-turbo" || model == "gpt-3.5-turbo-0125" {
 		promptRate = 0.0015
 		completionRate = 0.002
 	}
-
 	return (float64(promptTokens)/1000)*promptRate + (float64(completionTokens)/1000)*completionRate
 }

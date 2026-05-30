@@ -1,0 +1,74 @@
+# AegisAI Gateway — Helm Values
+gateway:
+  replicaCount: 2
+  image:
+    repository: aegisai/gateway
+    tag: latest
+    pullPolicy: IfNotPresent
+  port: 8443
+  env:
+    UPSTREAM_URL: "https://api.openai.com"
+    MAX_TOKENS_PER_MIN: "100000"
+    MAX_COST_PER_DAY: "10000"
+  resources:
+    requests:
+      cpu: "500m"
+      memory: "512Mi"
+    limits:
+      cpu: "2"
+      memory: "1Gi"
+  hpa:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 70
+    targetMemoryUtilizationPercentage: 80
+
+slmRedactor:
+  enabled: true
+  replicaCount: 2
+  image:
+    repository: aegisai/slm-redactor
+    tag: latest
+    pullPolicy: IfNotPresent
+  port: 8000
+  resources:
+    requests:
+      cpu: "1"
+      memory: "2Gi"
+    limits:
+      cpu: "4"
+      memory: "4Gi"
+
+dashboard:
+  enabled: true
+  replicaCount: 1
+  image:
+    repository: aegisai/dashboard
+    tag: latest
+    pullPolicy: IfNotPresent
+  port: 80
+  resources:
+    requests:
+      cpu: "200m"
+      memory: "256Mi"
+    limits:
+      cpu: "500m"
+      memory: "512Mi"
+
+redis:
+  enabled: true
+  architecture: standalone
+  auth:
+    enabled: true
+    password: ""
+
+postgresql:
+  enabled: true
+  auth:
+    database: aegis
+    username: aegis
+    password: ""
+
+ingress:
+  enabled: false
