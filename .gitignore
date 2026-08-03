@@ -1,0 +1,27 @@
+# Ignore local Python virtual environments
+venv/
+**/venv/
+.venv/
+
+# Ignore Python bytecode
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Ignore local node modules and build artifacts
+node_modules/
+**/node_modules/
+.vite/
+.DS_Store
+
+# Ignore editor metadata
+.vscode/
+.idea/
+
+# Ignore logs
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+*.log
