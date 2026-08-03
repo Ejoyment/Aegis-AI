@@ -25,6 +25,7 @@ import re
 from typing import List, Dict, Any, Optional
 
 from presidio_analyzer import AnalyzerEngine, Pattern, PatternRecognizer
+from presidio_analyzer.nlp_engine.spacy_nlp_engine import SpacyNlpEngine
 from presidio_anonymizer import AnonymizerEngine
 from presidio_anonymizer.entities import OperatorConfig
 
@@ -98,9 +99,12 @@ class PIIRedactor:
         self.supported_languages = supported_languages or ["en"]
         self.min_score_threshold = min_score_threshold
 
-        # Initialize Presidio analyzer
+        # Initialize Presidio analyzer using the installed local spaCy model.
         self.analyzer = AnalyzerEngine(
             supported_languages=self.supported_languages,
+            nlp_engine=SpacyNlpEngine(
+                models=[{"lang_code": "en", "model_name": "en_core_web_sm"}]
+            ),
         )
 
         # Register custom recognizers

@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import { useState } from 'react'
 import {
   DollarSign,
   Activity,
@@ -14,8 +14,8 @@ import { UsageChart, generateMockTimeSeries } from './components/UsageChart'
 import { useTotalStats, useAgentStats, useRecentLogs } from './hooks/useApi'
 
 export default function App() {
-  const { data: totals, loading: totalsLoading } = useTotalStats()
-  const { data: agents, loading: agentsLoading } = useAgentStats()
+  const { data: totals } = useTotalStats()
+  const { data: agents } = useAgentStats()
   const { data: logs } = useRecentLogs(50)
   const [chartData] = useState(() => generateMockTimeSeries())
 

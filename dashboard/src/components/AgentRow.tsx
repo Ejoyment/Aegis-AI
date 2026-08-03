@@ -1,4 +1,3 @@
-import React from 'react'
 import { AgentStats } from '../types'
 import { Shield, AlertTriangle, Clock } from 'lucide-react'
 

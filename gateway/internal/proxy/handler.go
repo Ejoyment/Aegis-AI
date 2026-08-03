@@ -16,6 +16,180 @@ const (
 	AgentIDHeader = "X-Aegis-Agent-ID"
 )
 
+const openAPISpec = `{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "AegisAI Gateway API",
+    "version": "1.0.0",
+    "description": "Built-in OpenAPI documentation for AegisAI Gateway endpoints."
+  },
+  "servers": [
+    {
+      "url": "http://localhost:8443",
+      "description": "Local development gateway"
+    }
+  ],
+  "paths": {
+    "/health": {
+      "get": {
+        "summary": "Health check",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/metrics": {
+      "get": {
+        "summary": "Prometheus metrics",
+        "responses": {
+          "200": {
+            "description": "Metrics text",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/stats/totals": {
+      "get": {
+        "summary": "Total statistics",
+        "responses": {
+          "200": {
+            "description": "Total statistics summary",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/stats/agents": {
+      "get": {
+        "summary": "Agent statistics",
+        "responses": {
+          "200": {
+            "description": "Agent stats list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/stats/logs": {
+      "get": {
+        "summary": "Recent audit logs",
+        "responses": {
+          "200": {
+            "description": "Audit log entries",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/chat/completions": {
+      "post": {
+        "summary": "LLM proxy endpoint",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "model": {"type": "string"},
+                  "messages": {"type": "array", "items": {"type": "object"}},
+                  "max_tokens": {"type": "integer"},
+                  "stream": {"type": "boolean"}
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "LLM response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}`
+
+const swaggerUIPage = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AegisAI Gateway API Docs</title>
+  <link rel="stylesheet" type="text/css" href="https://cdnjs.cloudflare.com/ajax/libs/swagger-ui/4.18.3/swagger-ui.min.css" />
+</head>
+<body>
+  <div id="swagger-ui"></div>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/swagger-ui/4.18.3/swagger-ui-bundle.min.js"></script>
+  <script>
+    window.ui = SwaggerUIBundle({
+      url: '/openapi.json',
+      dom_id: '#swagger-ui',
+      presets: [SwaggerUIBundle.presets.apis],
+      layout: 'BaseLayout',
+      deepLinking: true,
+    });
+  </script>
+</body>
+</html>`
+
 type RequestLog struct {
 	AgentID          string  `json:"agent_id"`
 	Model            string  `json:"model"`
@@ -117,6 +291,21 @@ aegis_upstream_latency_seconds_bucket{le="0.05"} 0
 aegis_upstream_latency_seconds_bucket{le="0.1"} 0
 aegis_upstream_latency_seconds_bucket{le="+Inf"} 0
 `)
+		return
+	}
+
+	// OpenAPI and Swagger UI endpoints
+	if r.URL.Path == "/openapi.json" {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(openAPISpec))
+		return
+	}
+
+	if r.URL.Path == "/docs" || r.URL.Path == "/swagger" {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(swaggerUIPage))
 		return
 	}
 
