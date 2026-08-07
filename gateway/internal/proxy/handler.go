@@ -9,7 +9,10 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"strconv"
 	"time"
+
+	"github.com/Ejoyment/Aegis-AI/gateway/internal/models"
 )
 
 const (
@@ -190,17 +193,6 @@ const swaggerUIPage = `<!DOCTYPE html>
 </body>
 </html>`
 
-type RequestLog struct {
-	AgentID          string  `json:"agent_id"`
-	Model            string  `json:"model"`
-	PromptTokens     int     `json:"prompt_tokens"`
-	CompletionTokens int     `json:"completion_tokens"`
-	TotalCost        float64 `json:"total_cost"`
-	RequestID        string  `json:"request_id"`
-	StatusCode       int     `json:"status_code"`
-	Timestamp        string  `json:"timestamp"`
-}
-
 type Proxy struct {
 	config    *Config
 	upstream  *url.URL
@@ -215,7 +207,10 @@ type RateLimiter interface {
 }
 
 type AuditLogger interface {
-	Log(entry *RequestLog) error
+	Log(entry *models.RequestLog) error
+	GetTotalStats() (*models.Stats, error)
+	GetAgentStats() ([]models.AgentStats, error)
+	GetRecentLogs(limit int) ([]models.RequestLog, error)
 }
 
 type Redactor interface {
@@ -398,7 +393,7 @@ aegis_upstream_latency_seconds_bucket{le="+Inf"} 0
 	cost := calculateCost(openAIReq.Model, promptTokens, completionTokens)
 
 	if p.audit != nil {
-		logEntry := &RequestLog{
+		logEntry := &models.RequestLog{
 			AgentID:          agentID,
 			Model:            openAIReq.Model,
 			PromptTokens:     promptTokens,
@@ -422,18 +417,45 @@ func (p *Proxy) handleStatsAPI(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 
+	limit := 50
+	if q := r.URL.Query().Get("limit"); q != "" {
+		if parsed, err := strconv.Atoi(q); err == nil && parsed > 0 {
+			limit = parsed
+		}
+	}
+
+	if p.audit == nil {
+		http.Error(w, "audit logger not configured", http.StatusServiceUnavailable)
+		return
+	}
+
 	switch r.URL.Path {
 	case "/api/v1/stats/totals":
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"total_tokens":   0,
-			"total_cost":     0,
-			"total_requests": 0,
-			"agent_count":    0,
-		})
+		totals, err := p.audit.GetTotalStats()
+		if err != nil {
+			http.Error(w, fmt.Sprintf("failed to load totals: %v", err), http.StatusInternalServerError)
+			return
+		}
+		json.NewEncoder(w).Encode(totals)
+
 	case "/api/v1/stats/agents":
-		json.NewEncoder(w).Encode([]interface{}{})
+		agents, err := p.audit.GetAgentStats()
+		if err != nil {
+			http.Error(w, fmt.Sprintf("failed to load agents: %v", err), http.StatusInternalServerError)
+			return
+		}
+		json.NewEncoder(w).Encode(agents)
+
 	case "/api/v1/stats/logs":
-		json.NewEncoder(w).Encode([]interface{}{})
+		logs, err := p.audit.GetRecentLogs(limit)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("failed to load logs: %v", err), http.StatusInternalServerError)
+			return
+		}
+		json.NewEncoder(w).Encode(logs)
+
+	default:
+		http.NotFound(w, r)
 	}
 }
 

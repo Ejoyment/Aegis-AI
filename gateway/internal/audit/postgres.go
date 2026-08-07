@@ -6,7 +6,7 @@ import (
 	"log"
 	"time"
 
-	"github.com/Ejoyment/Aegis-AI/gateway/internal/proxy"
+	"github.com/Ejoyment/Aegis-AI/gateway/internal/models"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -14,24 +14,6 @@ import (
 type PostgresLogger struct {
 	pool *pgxpool.Pool
 	ctx  context.Context
-}
-
-// Stats holds aggregated audit statistics for the dashboard.
-type Stats struct {
-	TotalTokens   int     `json:"total_tokens"`
-	TotalCost     float64 `json:"total_cost"`
-	TotalRequests int     `json:"total_requests"`
-	AgentCount    int     `json:"agent_count"`
-}
-
-// AgentStats holds per-agent aggregated statistics.
-type AgentStats struct {
-	AgentID             string  `json:"agent_id"`
-	TotalTokens         int     `json:"total_tokens"`
-	TotalCost           float64 `json:"total_cost"`
-	RequestCount        int     `json:"request_count"`
-	LastRequestAt       string  `json:"last_request_at"`
-	RedactionsTriggered int     `json:"redactions_triggered"`
 }
 
 // NewPostgresLogger creates a new PostgreSQL audit logger.
@@ -68,7 +50,7 @@ func NewPostgresLogger(databaseURL string) (*PostgresLogger, error) {
 }
 
 // Log persists a request audit log entry to PostgreSQL.
-func (l *PostgresLogger) Log(entry *proxy.RequestLog) error {
+func (l *PostgresLogger) Log(entry *models.RequestLog) error {
 	if l.pool == nil {
 		// Audit logging disabled — just log to stdout
 		log.Printf("[AUDIT] Agent=%s Model=%s Prompt=%d Completion=%d Cost=$%.6f Status=%d",
@@ -102,9 +84,9 @@ func (l *PostgresLogger) Log(entry *proxy.RequestLog) error {
 }
 
 // GetTotalStats returns aggregate statistics across all agents.
-func (l *PostgresLogger) GetTotalStats() (*Stats, error) {
+func (l *PostgresLogger) GetTotalStats() (*models.Stats, error) {
 	if l.pool == nil {
-		return &Stats{}, nil
+		return &models.Stats{}, nil
 	}
 
 	query := `
@@ -117,7 +99,7 @@ func (l *PostgresLogger) GetTotalStats() (*Stats, error) {
 		WHERE created_at >= NOW() - INTERVAL '30 days'
 	`
 
-	var stats Stats
+	var stats models.Stats
 	err := l.pool.QueryRow(l.ctx, query).Scan(
 		&stats.TotalTokens,
 		&stats.TotalCost,
@@ -128,13 +110,18 @@ func (l *PostgresLogger) GetTotalStats() (*Stats, error) {
 		return nil, fmt.Errorf("failed to query total stats: %w", err)
 	}
 
-	return &stats, nil
+	return &models.Stats{
+		TotalTokens:   stats.TotalTokens,
+		TotalCost:     stats.TotalCost,
+		TotalRequests: stats.TotalRequests,
+		AgentCount:    stats.AgentCount,
+	}, nil
 }
 
 // GetAgentStats returns aggregated statistics per agent.
-func (l *PostgresLogger) GetAgentStats() ([]AgentStats, error) {
+func (l *PostgresLogger) GetAgentStats() ([]models.AgentStats, error) {
 	if l.pool == nil {
-		return []AgentStats{}, nil
+		return []models.AgentStats{}, nil
 	}
 
 	query := `
@@ -156,9 +143,9 @@ func (l *PostgresLogger) GetAgentStats() ([]AgentStats, error) {
 	}
 	defer rows.Close()
 
-	var stats []AgentStats
+	var stats []models.AgentStats
 	for rows.Next() {
-		var s AgentStats
+		var s models.AgentStats
 		var lastRequestAt time.Time
 		if err := rows.Scan(
 			&s.AgentID,
@@ -177,9 +164,9 @@ func (l *PostgresLogger) GetAgentStats() ([]AgentStats, error) {
 }
 
 // GetRecentLogs returns the most recent audit log entries.
-func (l *PostgresLogger) GetRecentLogs(limit int) ([]proxy.RequestLog, error) {
+func (l *PostgresLogger) GetRecentLogs(limit int) ([]models.RequestLog, error) {
 	if l.pool == nil {
-		return []proxy.RequestLog{}, nil
+		return []models.RequestLog{}, nil
 	}
 
 	if limit <= 0 {
@@ -200,9 +187,9 @@ func (l *PostgresLogger) GetRecentLogs(limit int) ([]proxy.RequestLog, error) {
 	}
 	defer rows.Close()
 
-	var logs []proxy.RequestLog
+	var logs []models.RequestLog
 	for rows.Next() {
-		var entry proxy.RequestLog
+		var entry models.RequestLog
 		var createdAt time.Time
 		if err := rows.Scan(
 			&entry.AgentID,
@@ -224,9 +211,9 @@ func (l *PostgresLogger) GetRecentLogs(limit int) ([]proxy.RequestLog, error) {
 }
 
 // GetAgentLogs returns audit logs for a specific agent.
-func (l *PostgresLogger) GetAgentLogs(agentID string, limit int) ([]proxy.RequestLog, error) {
+func (l *PostgresLogger) GetAgentLogs(agentID string, limit int) ([]models.RequestLog, error) {
 	if l.pool == nil {
-		return []proxy.RequestLog{}, nil
+		return []models.RequestLog{}, nil
 	}
 
 	if limit <= 0 {
@@ -248,9 +235,9 @@ func (l *PostgresLogger) GetAgentLogs(agentID string, limit int) ([]proxy.Reques
 	}
 	defer rows.Close()
 
-	var logs []proxy.RequestLog
+	var logs []models.RequestLog
 	for rows.Next() {
-		var entry proxy.RequestLog
+		var entry models.RequestLog
 		var createdAt time.Time
 		if err := rows.Scan(
 			&entry.AgentID,
@@ -314,5 +301,4 @@ func runMigrations(ctx context.Context, pool *pgxpool.Pool) error {
 	return nil
 }
 
-// Ensure PostgresLogger implements proxy.AuditLogger.
-var _ proxy.AuditLogger = (*PostgresLogger)(nil)
+// PostgresLogger implements the audit logger for PostgreSQL.
