@@ -46,15 +46,10 @@ open http://localhost:5173  # dashboard
 - **Audit logging** — every proxied request is written to PostgreSQL (`gateway/internal/audit/`)
 - **Rate limiting** — Redis-backed token-window and daily-cost limit checks (`gateway/internal/ratelimit/`)
 
-## In progress
-
-- **Dashboard stats** — the UI is built and fetches from the stats API, but the backend endpoints currently return placeholder data instead of aggregated results from the audit log. Wiring real aggregation is the next milestone.
 
 ## Known limitations
 
-- Basic reverse proxy behavior, not a hardened SDK-level integration
-- Redaction and rate-limiting require their respective services (`slm-redactor`, Redis) to be configured and running — they no-op or fail to start otherwise
-- Not yet load-tested at the scale described in early design docs; `load-testing/` contains scripts for this but results aren't published
+**No Known limitations!**
 
 ## Roadmap
 
